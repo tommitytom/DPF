@@ -1611,8 +1611,13 @@ public:
                 // restore read character
                 buffer[read] = orig;
 
-                // if buffer offset points to null, we found the end of a string, lets check
-                if (buffer[i] == '\0')
+                // if buffer offset points to null, we found the end of a string, lets check.
+                // guard with `i < read`: if i == read then strlen walked off the end of the
+                // chunk and stopped at the synthetic null we placed at buffer[read] — the
+                // string is not actually terminated, just continues into the next read.
+                // without this guard, partial keys/values get processed as if complete
+                // when buffer[read] (uninitialised stack memory) happens to be 0.
+                if (i < read && buffer[i] == '\0')
                 {
                     // special keys
                     if (key == "__dpf_state_begin__")
