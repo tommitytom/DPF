@@ -815,13 +815,38 @@ function(dpf__build_au NAME HAS_UI)
   dpf__add_ui_main("${NAME}-export" "export" "${HAS_UI}")
   target_link_libraries("${NAME}-export" PRIVATE "${NAME}-dsp" "${NAME}-ui")
 
-  separate_arguments(CMAKE_CROSSCOMPILING_EMULATOR)
+  set(_dpf_au_needs_host_export OFF)
+  if(APPLE AND CMAKE_OSX_ARCHITECTURES AND CMAKE_HOST_SYSTEM_PROCESSOR)
+    set(_dpf_au_host_arch "${CMAKE_HOST_SYSTEM_PROCESSOR}")
+    if(_dpf_au_host_arch STREQUAL "aarch64")
+      set(_dpf_au_host_arch "arm64")
+    endif()
+    set(_dpf_au_target_archs ${CMAKE_OSX_ARCHITECTURES})
+    list(FIND _dpf_au_target_archs "${_dpf_au_host_arch}" _dpf_au_host_arch_index)
+    if(_dpf_au_host_arch_index EQUAL -1)
+      set(_dpf_au_needs_host_export ON)
+    endif()
+  endif()
+
+  set(DPF_AU_EXPORT_EXECUTABLE "" CACHE FILEPATH
+    "Path to a host-built DPF AU export executable. Leave empty to use the in-tree export target.")
+  if(_dpf_au_needs_host_export AND NOT DPF_AU_EXPORT_EXECUTABLE)
+    message(FATAL_ERROR
+      "This Apple AU build does not include the host architecture in "
+      "CMAKE_OSX_ARCHITECTURES. Set "
+      "-DDPF_AU_EXPORT_EXECUTABLE=/path/to/host/${NAME}-export.")
+  endif()
+  if(DPF_AU_EXPORT_EXECUTABLE)
+    set(_dpf_au_export_command "${DPF_AU_EXPORT_EXECUTABLE}")
+  else()
+    separate_arguments(CMAKE_CROSSCOMPILING_EMULATOR)
+    set(_dpf_au_export_command ${CMAKE_CROSSCOMPILING_EMULATOR} "$<TARGET_FILE:${NAME}-export>")
+    add_dependencies("${NAME}-au" "${NAME}-export")
+  endif()
 
   add_custom_command(TARGET "${NAME}-au" POST_BUILD
-    COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR} "$<TARGET_FILE:${NAME}-export>" "${NAME}"
+    COMMAND ${_dpf_au_export_command} "${NAME}"
     WORKING_DIRECTORY "${PROJECT_BINARY_DIR}/bin/${NAME}.component/Contents")
-
-  add_dependencies("${NAME}-au" "${NAME}-export")
 
   file(COPY "${DPF_ROOT_DIR}/utils/plugin.bundle/Contents/PkgInfo"
     DESTINATION "${PROJECT_BINARY_DIR}/bin/${NAME}.component/Contents")
