@@ -744,8 +744,9 @@ void Window::PrivateData::onPuglClose()
 {
     DGL_DBG("PUGL: onClose\n");
 
-#ifndef DISTRHO_OS_MAC
-    // if we are running as standalone we can prevent closing in certain conditions
+    // if we are running as standalone we can prevent closing in certain conditions.
+    // (Consulted on all platforms, incl. macOS, so a standalone UI can veto the
+    // close — e.g. an unsaved-changes prompt.)
     if (appData->isStandalone)
     {
         // a child window is active, gives focus to it
@@ -756,7 +757,6 @@ void Window::PrivateData::onPuglClose()
         if (! self->onClose())
             return;
     }
-#endif
 
     if (modal.enabled)
         stopModal();

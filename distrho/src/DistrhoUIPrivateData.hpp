@@ -236,6 +236,13 @@ protected:
         ui->uiFocus(focus, mode);
     }
 
+    bool onClose() override
+    {
+        // Forward the window-close request to the UI so a standalone can veto it
+        // (e.g. to prompt about unsaved changes). Default UI::onClose() allows it.
+        return ui != nullptr ? ui->onClose() : true;
+    }
+
   #if DGL_ALLOW_DEPRECATED_METHODS
    #if defined(_MSC_VER)
     #pragma warning(push)

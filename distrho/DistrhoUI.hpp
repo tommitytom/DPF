@@ -273,6 +273,15 @@ protected:
     virtual void uiIdle() {}
 
    /**
+      Window close function, called when the user tries to close the window
+      (standalone only). Return true to allow the close, false to veto it.
+      This lets a standalone UI intercept the window's X button — e.g. to prompt
+      about unsaved changes — by overriding Window::onClose() at the UI level.
+      The default implementation allows the close.
+    */
+    virtual bool onClose() { return true; }
+
+   /**
       Window scale factor function, called when the scale factor changes.
       This function is for plugin UIs to be able to override Window::onScaleFactorChanged(double).
 
