@@ -50,7 +50,15 @@ struct FileBrowserOptions {
     /** Class name of the matching Application instance that controls this dialog */
     const char* className;
 
-    // TODO file filter
+    /** Optional human label for the file-type filter, e.g. "Audio files".
+        When null a label is generated from fileFilterPatterns. */
+    const char* fileFilterName;
+
+    /** Optional file-type filter: a whitespace-separated list of glob patterns
+        matched against the file's basename, e.g. "*.wav *.flac", "*.tar.gz" or
+        "*.mp?". When null/empty no filtering is applied. Patterns must not
+        contain spaces. */
+    const char* fileFilterPatterns;
 
    /**
       File browser button state.
@@ -88,6 +96,8 @@ struct FileBrowserOptions {
         startDir(nullptr),
         title(nullptr),
         className(nullptr),
+        fileFilterName(nullptr),
+        fileFilterPatterns(nullptr),
         buttons() {}
 };
 

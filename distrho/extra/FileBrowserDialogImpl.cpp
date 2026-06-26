@@ -24,6 +24,9 @@
 #include "ScopedPointer.hpp"
 #include "String.hpp"
 
+#include <string>
+#include <vector>
+
 #ifdef DISTRHO_OS_MAC
 # import <Cocoa/Cocoa.h>
 #endif
@@ -42,6 +45,11 @@
 # include <vector>
 #else
 # include <unistd.h>
+#endif
+
+// POSIX glob matching for the file-type filter (sofd fallback + macOS delegate)
+#if defined(HAVE_X11) || defined(DISTRHO_OS_MAC)
+# include <fnmatch.h>
 #endif
 
 #ifdef HAVE_DBUS
@@ -69,6 +77,50 @@
 # undef MIN
 #endif
 
+#ifdef DISTRHO_OS_MAC
+// Panel delegate implementing the file-type filter via glob matching. This is
+// the only backend that can't express arbitrary globs through the simple API
+// (NSSavePanel.allowedFileTypes only matches the trailing extension), so we
+// enable/disable each URL ourselves. The class name is suffixed with the file
+// browser namespace so the two ObjC++ translation units that include this file
+// (DGL via pugl, DISTRHO via DistrhoUI_macOS) don't register a duplicate class.
+# define DPF_FB_DELEGATE_HELPER(NS) DPFFileBrowserDelegate_ ## NS
+# define DPF_FB_DELEGATE_NAME(NS) DPF_FB_DELEGATE_HELPER(NS)
+# define DPFFileBrowserDelegateClass DPF_FB_DELEGATE_NAME(FILE_BROWSER_DIALOG_NAMESPACE)
+
+@interface DPFFileBrowserDelegateClass : NSObject<NSOpenSavePanelDelegate>
+{
+@public
+    std::vector<std::string> patterns;
+}
+@end
+
+@implementation DPFFileBrowserDelegateClass
+- (BOOL)panel:(id)sender shouldEnableURL:(NSURL*)url
+{
+    (void)sender;
+
+    // always allow descending into directories
+    NSNumber* isDir = nil;
+    if ([url getResourceValue:&isDir forKey:NSURLIsDirectoryKey error:nil] && [isDir boolValue])
+        return YES;
+
+    if (patterns.empty())
+        return YES;
+
+    const char* const name = [[url lastPathComponent] UTF8String];
+    if (name == nullptr)
+        return YES;
+
+    for (const std::string& pat : patterns)
+        if (fnmatch(pat.c_str(), name, FNM_CASEFOLD) == 0)
+            return YES;
+
+    return NO;
+}
+@end
+#endif
+
 #ifdef FILE_BROWSER_DIALOG_DGL_NAMESPACE
 START_NAMESPACE_DGL
 using DISTRHO_NAMESPACE::ScopedPointer;
@@ -82,6 +134,51 @@ START_NAMESPACE_DISTRHO
 // static pointer used for signal null/none action taken
 static const char* const kSelectedFileCancelled = "__dpf_cancelled__";
 
+// --------------------------------------------------------------------------------------------------------------------
+// file-type filter helpers
+
+// Split a whitespace-separated list of glob patterns ("*.wav *.flac") into tokens.
+static std::vector<std::string> splitFileFilterPatterns(const char* const patterns)
+{
+    std::vector<std::string> out;
+
+    if (patterns == nullptr)
+        return out;
+
+    for (const char* p = patterns; *p != '\0';)
+    {
+        while (*p == ' ' || *p == '\t')
+            ++p;
+
+        const char* const start = p;
+        while (*p != '\0' && *p != ' ' && *p != '\t')
+            ++p;
+
+        if (p != start)
+            out.emplace_back(start, static_cast<size_t>(p - start));
+    }
+
+    return out;
+}
+
+#ifdef HAVE_X11
+// libsofd's filter callback takes only the basename (no userdata), so the
+// active pattern set lives here. The dialog is single-instance per process.
+static std::vector<std::string> sofdFilterPatterns;
+
+static int sofdFilterCallback(const char* const name)
+{
+    if (sofdFilterPatterns.empty())
+        return 1;
+
+    for (const std::string& pat : sofdFilterPatterns)
+        if (fnmatch(pat.c_str(), name, FNM_CASEFOLD) == 0)
+            return 1;
+
+    return 0;
+}
+#endif
+
 #ifdef HAVE_DBUS
 static constexpr bool isHexChar(const char c) noexcept
 {
@@ -91,6 +188,31 @@ static constexpr bool isHexChar(const char c) noexcept
 static constexpr int toHexChar(const char c) noexcept
 {
     return c >= '0' && c <= '9' ? c - '0' : (c >= 'A' && c <= 'F' ? c - 'A' : c - 'a') + 10;
+}
+
+// Append one portal filter struct "(sa(us))": (name, [(0=glob, pattern), ...]).
+static void appendPortalFilter(DBusMessageIter* const filterArray,
+                               const char* const name,
+                               const std::vector<std::string>& globs)
+{
+    DBusMessageIter filterStruct, globArray;
+    dbus_message_iter_open_container(filterArray, DBUS_TYPE_STRUCT, nullptr, &filterStruct);
+    dbus_message_iter_append_basic(&filterStruct, DBUS_TYPE_STRING, &name);
+    dbus_message_iter_open_container(&filterStruct, DBUS_TYPE_ARRAY, "(us)", &globArray);
+
+    for (const std::string& glob : globs)
+    {
+        DBusMessageIter globStruct;
+        const dbus_uint32_t kind = 0; // 0 = glob pattern, 1 = mime type
+        const char* const globPtr = glob.c_str();
+        dbus_message_iter_open_container(&globArray, DBUS_TYPE_STRUCT, nullptr, &globStruct);
+        dbus_message_iter_append_basic(&globStruct, DBUS_TYPE_UINT32, &kind);
+        dbus_message_iter_append_basic(&globStruct, DBUS_TYPE_STRING, &globPtr);
+        dbus_message_iter_close_container(&globArray, &globStruct);
+    }
+
+    dbus_message_iter_close_container(&filterStruct, &globArray);
+    dbus_message_iter_close_container(filterArray, &filterStruct);
 }
 #endif
 
@@ -197,6 +319,7 @@ struct FileBrowserData {
 #ifdef DISTRHO_OS_MAC
     NSSavePanel* nsBasePanel;
     NSOpenPanel* nsOpenPanel;
+    id nsDelegate;
 #endif
 #ifdef HAVE_DBUS
     DBusConnection* dbuscon;
@@ -217,6 +340,7 @@ struct FileBrowserData {
     std::vector<WCHAR> fileNameW;
     std::vector<WCHAR> startDirW;
     std::vector<WCHAR> titleW;
+    std::vector<WCHAR> filterW;
     const bool saving;
     bool isEmbed;
 
@@ -265,6 +389,40 @@ struct FileBrowserData {
         titleW.resize(std::strlen(windowTitle) + 1);
         if (MultiByteToWideChar(CP_UTF8, 0, windowTitle, -1, titleW.data(), static_cast<int>(titleW.size())))
             ofn.lpstrTitle = titleW.data();
+
+        // file-type filter: a double-NUL-terminated "label\0patterns\0..\0\0" list
+        const std::vector<std::string> filterPats = splitFileFilterPatterns(options.fileFilterPatterns);
+        if (! filterPats.empty())
+        {
+            std::string joined;
+            for (size_t i = 0; i < filterPats.size(); ++i)
+            {
+                if (i != 0)
+                    joined += ';';
+                joined += filterPats[i];
+            }
+
+            std::string label = options.fileFilterName != nullptr && options.fileFilterName[0] != '\0'
+                              ? std::string(options.fileFilterName) : std::string("Supported files");
+            label += " (" + joined + ")";
+
+            // assemble UTF-8 with embedded NULs, then convert with explicit length
+            std::string buf;
+            buf.append(label);             buf.push_back('\0');
+            buf.append(joined);            buf.push_back('\0');
+            buf.append("All files (*.*)"); buf.push_back('\0');
+            buf.append("*.*");             buf.push_back('\0');
+            buf.push_back('\0');
+
+            const int wlen = MultiByteToWideChar(CP_UTF8, 0, buf.data(), static_cast<int>(buf.size()), nullptr, 0);
+            if (wlen > 0)
+            {
+                filterW.resize(static_cast<size_t>(wlen));
+                MultiByteToWideChar(CP_UTF8, 0, buf.data(), static_cast<int>(buf.size()), filterW.data(), wlen);
+                ofn.lpstrFilter = filterW.data();
+                ofn.nFilterIndex = 1;
+            }
+        }
 
         uint threadId;
         threadCancelled = false;
@@ -351,6 +509,7 @@ struct FileBrowserData {
        #ifdef DISTRHO_OS_MAC
         , nsBasePanel(nullptr)
         , nsOpenPanel(nullptr)
+        , nsDelegate(nullptr)
        #endif
        #ifdef HAVE_DBUS
         , dbuscon(nullptr)
@@ -390,6 +549,11 @@ struct FileBrowserData {
     ~FileBrowserData()
     {
 #ifdef DISTRHO_OS_MAC
+        if (nsDelegate != nullptr)
+        {
+            [nsBasePanel setDelegate:nil];
+            [nsDelegate release];
+        }
         [nsBasePanel release];
 #endif
 #ifdef DISTRHO_OS_WASM
@@ -500,7 +664,17 @@ FileBrowserHandle fileBrowserCreate(const bool isEmbed,
              encoding:NSUTF8StringEncoding];
     [nsBasePanel setDirectoryURL:[NSURL fileURLWithPath:startDirString]];
 
-    // TODO file filter using allowedContentTypes: [UTType]
+    // file-type filter via a panel delegate (glob matching, see class above)
+    {
+        const std::vector<std::string> filterPats = splitFileFilterPatterns(options.fileFilterPatterns);
+        if (! filterPats.empty())
+        {
+            DPFFileBrowserDelegateClass* const delegate = [[DPFFileBrowserDelegateClass alloc] init];
+            delegate->patterns = filterPats;
+            [nsBasePanel setDelegate:delegate];
+            handle->nsDelegate = delegate;
+        }
+    }
 
     if (options.buttons.listAllFiles == FileBrowserOptions::kButtonVisibleChecked)
         [nsBasePanel setAllowsOtherFileTypes:YES];
@@ -635,6 +809,33 @@ FileBrowserHandle fileBrowserCreate(const bool isEmbed,
                     dbus_message_iter_close_container(&array, &dict);
                 }
 
+                // file-type filter option: "filters" of type a(sa(us))
+                {
+                    const std::vector<std::string> filterPats = splitFileFilterPatterns(options.fileFilterPatterns);
+                    if (! filterPats.empty())
+                    {
+                        DBusMessageIter dict, variant, filterArray;
+                        const char* const filters_key = "filters";
+
+                        dbus_message_iter_open_container(&array, DBUS_TYPE_DICT_ENTRY, nullptr, &dict);
+                        dbus_message_iter_append_basic(&dict, DBUS_TYPE_STRING, &filters_key);
+                        dbus_message_iter_open_container(&dict, DBUS_TYPE_VARIANT, "a(sa(us))", &variant);
+                        dbus_message_iter_open_container(&variant, DBUS_TYPE_ARRAY, "(sa(us))", &filterArray);
+
+                        const char* const filterName =
+                            options.fileFilterName != nullptr && options.fileFilterName[0] != '\0'
+                                ? options.fileFilterName : "Supported files";
+                        appendPortalFilter(&filterArray, filterName, filterPats);
+
+                        const std::vector<std::string> allGlobs(1, std::string("*"));
+                        appendPortalFilter(&filterArray, "All files", allGlobs);
+
+                        dbus_message_iter_close_container(&variant, &filterArray);
+                        dbus_message_iter_close_container(&dict, &variant);
+                        dbus_message_iter_close_container(&array, &dict);
+                    }
+                }
+
                 dbus_message_iter_close_container(&iter, &array);
 
                 dbus_connection_send(dbuscon, msg, nullptr);
@@ -667,6 +868,11 @@ FileBrowserHandle fileBrowserCreate(const bool isEmbed,
     x_fib_cfg_buttons(1, button1);
     x_fib_cfg_buttons(2, button2);
     x_fib_cfg_buttons(3, button3);
+
+    // file-type filter: install a basename glob callback (sofd has no userdata,
+    // so the active pattern set lives in a file-static; single dialog at a time)
+    sofdFilterPatterns = splitFileFilterPatterns(options.fileFilterPatterns);
+    x_fib_cfg_filter_callback(sofdFilterPatterns.empty() ? nullptr : sofdFilterCallback);
 
     if (x_fib_show(x11display, windowId, 0, 0, scaleFactor + 0.5) != 0)
         return nullptr;
