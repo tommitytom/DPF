@@ -436,7 +436,11 @@ function(dpf__build_jack NAME HAS_UI FORCE_NATIVE_AUDIO_FALLBACK SKIP_NATIVE_AUD
 
   if(NOT FORCE_NATIVE_AUDIO_FALLBACK)
     target_compile_definitions("${NAME}" PUBLIC "HAVE_JACK")
-    target_compile_definitions("${NAME}-jack" PRIVATE "HAVE_GETTIMEOFDAY")
+    # MSVC has no <sys/time.h>/gettimeofday; RtAudio only uses it for an
+    # optional stream-tick timestamp, so leave it undefined there.
+    if(NOT MSVC)
+      target_compile_definitions("${NAME}-jack" PRIVATE "HAVE_GETTIMEOFDAY")
+    endif()
   endif()
 
   if(SKIP_NATIVE_AUDIO_FALLBACK)

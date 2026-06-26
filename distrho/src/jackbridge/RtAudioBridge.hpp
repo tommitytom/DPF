@@ -27,7 +27,7 @@
 # define __MACOSX_CORE__
 # define RTAUDIO_API_TYPE MACOSX_CORE
 # define RTMIDI_API_TYPE MACOSX_CORE
-#elif defined(DISTRHO_OS_WINDOWS) && !defined(_MSC_VER)
+#elif defined(DISTRHO_OS_WINDOWS)
 # define __WINDOWS_WASAPI__
 # define __WINDOWS_MM__
 # define RTAUDIO_API_TYPE WINDOWS_WASAPI
@@ -175,7 +175,11 @@ struct RtAudioBridge : NativeBridge {
 
     bool requestMIDI() override
     {
+       #ifdef _MSC_VER
+        d_stdout("%s %d", __FUNCSIG__, __LINE__);
+       #else
         d_stdout("%s %d", __PRETTY_FUNCTION__, __LINE__);
+       #endif
         // clear ports in use first
        #if defined(RTMIDI_API_TYPE) && DISTRHO_PLUGIN_WANT_MIDI_INPUT
         if (!midiIns.empty())
