@@ -30,7 +30,9 @@
 // FIXME make Mutex stop relying on pthread
 #ifdef _MSC_VER
 #define DISTRHO_OS_WINDOWS__TODO
-#pragma NOTE(DPF Mutex implementation is TODO on MSVC)
+// NOTE: DPF Mutex implementation is TODO on MSVC.
+// (Was `#pragma NOTE(...)`, which MSVC doesn't recognise → C4068; a plain
+// comment keeps the marker without the unknown-pragma warning or build noise.)
 #else
 #include <pthread.h>
 #endif

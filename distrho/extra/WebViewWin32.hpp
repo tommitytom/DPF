@@ -51,8 +51,19 @@ END_NAMESPACE_DISTRHO
 
 #ifdef DISTRHO_WEB_VIEW_INCLUDE_IMPLEMENTATION
 
-# define WC_ERR_INVALID_CHARS 0x80
+# ifndef WC_ERR_INVALID_CHARS // fallback for old SDKs that don't define it
+#  define WC_ERR_INVALID_CHARS 0x80
+# endif
+// choc pulls in <windows.h>, whose winnls.h re-#defines WC_ERR_INVALID_CHARS to
+// the same 0x80 on modern SDKs → a benign C4005. Suppress just that here.
+# ifdef _MSC_VER
+#  pragma warning(push)
+#  pragma warning(disable: 4005)
+# endif
 # include "choc/choc_WebView.h"
+# ifdef _MSC_VER
+#  pragma warning(pop)
+# endif
 
 #ifdef WEB_VIEW_DGL_NAMESPACE
 START_NAMESPACE_DGL

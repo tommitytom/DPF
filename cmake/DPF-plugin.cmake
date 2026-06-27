@@ -126,6 +126,17 @@ function(dpf_add_plugin NAME)
     set(_dpf_plugin_UI_TYPE "opengl")
   endif()
 
+  # WebViewWin32.cpp / DistrhoUI_win32.cpp require >= c++17, so dpf forces /std on
+  # just those sources. Only do that when the consuming project builds BELOW 17 —
+  # if it already builds at >=17, a second /std flag trips MSVC's command-line
+  # warning D9025 ("overriding /std:c++20 with /std:c++17"). Empty = no extra flag.
+  # Visible in the dpf__add_dgl_* helpers below via CMake's function scoping.
+  if(DEFINED CMAKE_CXX_STANDARD AND NOT "${CMAKE_CXX_STANDARD}" STREQUAL "" AND NOT CMAKE_CXX_STANDARD LESS 17)
+    set(_dpf_webview_std_flag "")
+  else()
+    set(_dpf_webview_std_flag "$<IF:$<BOOL:${MSVC}>,/std:c++17,-std=gnu++17>")
+  endif()
+
   set(_dgl_library)
   if(_dpf_plugin_FILES_UI)
     if(_dpf_plugin_UI_TYPE STREQUAL "cairo")
@@ -304,6 +315,17 @@ function(dpf_add_executable NAME)
 
   if("${_dpf_plugin_UI_TYPE}" STREQUAL "")
     set(_dpf_plugin_UI_TYPE "opengl")
+  endif()
+
+  # WebViewWin32.cpp / DistrhoUI_win32.cpp require >= c++17, so dpf forces /std on
+  # just those sources. Only do that when the consuming project builds BELOW 17 —
+  # if it already builds at >=17, a second /std flag trips MSVC's command-line
+  # warning D9025 ("overriding /std:c++20 with /std:c++17"). Empty = no extra flag.
+  # Visible in the dpf__add_dgl_* helpers below via CMake's function scoping.
+  if(DEFINED CMAKE_CXX_STANDARD AND NOT "${CMAKE_CXX_STANDARD}" STREQUAL "" AND NOT CMAKE_CXX_STANDARD LESS 17)
+    set(_dpf_webview_std_flag "")
+  else()
+    set(_dpf_webview_std_flag "$<IF:$<BOOL:${MSVC}>,/std:c++17,-std=gnu++17>")
   endif()
 
   set(_dgl_library)
@@ -924,7 +946,7 @@ function(dpf__add_dgl_cairo SHARED_RESOURCES USE_FILE_BROWSER USE_WEB_VIEW)
       set_source_files_properties("${DPF_ROOT_DIR}/dgl/src/WebViewWin32.cpp"
         PROPERTIES
           COMPILE_FLAGS
-            $<IF:$<BOOL:${MSVC}>,/std:c++17,-std=gnu++17>)
+            "${_dpf_webview_std_flag}")
     endif()
   endif()
 
@@ -999,7 +1021,7 @@ function(dpf__add_dgl_external USE_FILE_BROWSER USE_WEB_VIEW)
       set_source_files_properties("${DPF_ROOT_DIR}/dgl/src/WebViewWin32.cpp"
         PROPERTIES
           COMPILE_FLAGS
-            $<IF:$<BOOL:${MSVC}>,/std:c++17,-std=gnu++17>)
+            "${_dpf_webview_std_flag}")
     endif()
   endif()
 
@@ -1086,7 +1108,7 @@ function(dpf__add_dgl_gles2 SHARED_RESOURCES USE_FILE_BROWSER USE_WEB_VIEW)
       set_source_files_properties("${DPF_ROOT_DIR}/dgl/src/WebViewWin32.cpp"
         PROPERTIES
           COMPILE_FLAGS
-            $<IF:$<BOOL:${MSVC}>,/std:c++17,-std=gnu++17>)
+            "${_dpf_webview_std_flag}")
     endif()
   endif()
 
@@ -1185,7 +1207,7 @@ function(dpf__add_dgl_gles3 SHARED_RESOURCES USE_FILE_BROWSER USE_WEB_VIEW)
       set_source_files_properties("${DPF_ROOT_DIR}/dgl/src/WebViewWin32.cpp"
         PROPERTIES
           COMPILE_FLAGS
-            $<IF:$<BOOL:${MSVC}>,/std:c++17,-std=gnu++17>)
+            "${_dpf_webview_std_flag}")
     endif()
   endif()
 
@@ -1284,7 +1306,7 @@ function(dpf__add_dgl_opengl SHARED_RESOURCES USE_FILE_BROWSER USE_WEB_VIEW)
       set_source_files_properties("${DPF_ROOT_DIR}/dgl/src/WebViewWin32.cpp"
         PROPERTIES
           COMPILE_FLAGS
-            $<IF:$<BOOL:${MSVC}>,/std:c++17,-std=gnu++17>)
+            "${_dpf_webview_std_flag}")
     endif()
   endif()
 
@@ -1380,7 +1402,7 @@ function(dpf__add_dgl_opengl3 SHARED_RESOURCES USE_FILE_BROWSER USE_WEB_VIEW)
       set_source_files_properties("${DPF_ROOT_DIR}/dgl/src/WebViewWin32.cpp"
         PROPERTIES
           COMPILE_FLAGS
-            $<IF:$<BOOL:${MSVC}>,/std:c++17,-std=gnu++17>)
+            "${_dpf_webview_std_flag}")
     endif()
   endif()
 
@@ -1466,7 +1488,7 @@ function(dpf__add_dgl_vulkan SHARED_RESOURCES USE_FILE_BROWSER USE_WEB_VIEW)
       set_source_files_properties("${DPF_ROOT_DIR}/dgl/src/WebViewWin32.cpp"
         PROPERTIES
           COMPILE_FLAGS
-            $<IF:$<BOOL:${MSVC}>,/std:c++17,-std=gnu++17>)
+            "${_dpf_webview_std_flag}")
     endif()
   endif()
 
@@ -1499,7 +1521,7 @@ function(dpf__add_plugin_specific_ui_sources NAME USE_WEB_VIEW)
     set_source_files_properties("${DPF_ROOT_DIR}/distrho/DistrhoUI_win32.cpp"
       PROPERTIES
         COMPILE_FLAGS
-          $<IF:$<BOOL:${MSVC}>,/std:c++17,-std=gnu++17>)
+          "${_dpf_webview_std_flag}")
     target_link_libraries("${NAME}" PRIVATE "ole32" "uuid")
   endif()
 endfunction()
